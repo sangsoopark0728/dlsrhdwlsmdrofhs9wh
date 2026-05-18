@@ -1,0 +1,744 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Space Invaders</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    min-height: 100vh;
+    padding: 16px 8px;
+    font-family: 'Press Start 2P', 'Courier New', monospace;
+    overflow: hidden;
+  }
+
+  #hud {
+    width: 700px;
+    max-width: 100%;
+    display: flex;
+    justify-content: space-between;
+    color: #00ff88;
+    font-size: 10px;
+    letter-spacing: 1px;
+    text-shadow: 0 0 8px #00ff88;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  #canvas-wrap {
+    position: relative;
+    display: inline-block;
+    border: 2px solid #00ff88;
+    box-shadow: 0 0 30px #00ff8855, 0 0 60px #00ff8822;
+  }
+
+  canvas {
+    display: block;
+    background: #000;
+    cursor: none;
+  }
+
+  #overlay {
+    position: absolute;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    color: #fff;
+    font-family: 'Press Start 2P', monospace;
+    font-size: 18px;
+    text-align: center;
+    line-height: 2.2;
+    pointer-events: none;
+    white-space: nowrap;
+    display: none;
+  }
+
+  #controls {
+    color: #1a4a2a;
+    font-size: 7px;
+    letter-spacing: 1px;
+    text-align: center;
+    margin-top: 10px;
+  }
+
+  @keyframes blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0; }
+  }
+  .blink { animation: blink 1s infinite; }
+</style>
+</head>
+<body>
+
+<div id="hud">
+  <span>SCORE <span id="h-score">0</span></span>
+  <span>HI <span id="h-hi">0</span></span>
+  <span>LEVEL <span id="h-level">1</span></span>
+  <span>LIVES <span id="h-lives">♥ ♥ ♥</span></span>
+</div>
+
+<div id="canvas-wrap">
+  <canvas id="c"></canvas>
+  <div id="overlay"></div>
+</div>
+
+<div id="controls">
+  ← → MOVE &nbsp;&nbsp;&nbsp; SPACE SHOOT &nbsp;&nbsp;&nbsp; P PAUSE &nbsp;&nbsp;&nbsp; R RESTART
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+//  CANVAS SETUP
+// ═══════════════════════════════════════════════
+const canvas  = document.getElementById('c');
+const ctx     = canvas.getContext('2d');
+const overlay = document.getElementById('overlay');
+
+const W = 700, H = 520;
+canvas.width  = W;
+canvas.height = H;
+
+// ═══════════════════════════════════════════════
+//  PALETTE
+// ═══════════════════════════════════════════════
+const COL = {
+  player:   '#00ff88',
+  squid:    '#ff4466',
+  crab:     '#ff9900',
+  octopus:  '#44ccff',
+  ufo:      '#ff44ff',
+  bullet_p: '#00ff88',
+  bullet_e: '#ff3322',
+  bunker:   '#00cc66',
+  grid:     '#001a00',
+  glow_p:   '#00ff8866',
+  glow_e:   '#ff332266',
+};
+
+// ═══════════════════════════════════════════════
+//  PIXEL-ART SPRITES  (rows × cols grid, 1=on)
+// ═══════════════════════════════════════════════
+const SPR = {
+  squid_a: [
+    [0,0,0,1,1,1,1,1,0,0,0],
+    [0,1,1,1,1,1,1,1,1,1,0],
+    [1,1,0,1,1,1,1,1,0,1,1],
+    [1,1,1,1,1,1,1,1,1,1,1],
+    [0,0,1,1,0,0,0,1,1,0,0],
+    [0,1,1,0,1,1,1,0,1,1,0],
+    [1,0,0,0,1,1,1,0,0,0,1],
+    [0,1,0,0,0,0,0,0,0,1,0],
+  ],
+  squid_b: [
+    [0,0,0,1,1,1,1,1,0,0,0],
+    [0,1,1,1,1,1,1,1,1,1,0],
+    [1,1,0,1,1,1,1,1,0,1,1],
+    [1,1,1,1,1,1,1,1,1,1,1],
+    [0,0,1,1,0,0,0,1,1,0,0],
+    [0,0,0,1,0,1,0,1,0,0,0],
+    [0,0,1,0,1,0,1,0,1,0,0],
+    [0,1,0,0,0,0,0,0,0,1,0],
+  ],
+  crab_a: [
+    [0,0,1,0,0,0,0,0,1,0,0],
+    [0,0,0,1,0,0,0,1,0,0,0],
+    [0,0,1,1,1,1,1,1,1,0,0],
+    [0,1,1,0,1,1,1,0,1,1,0],
+    [1,1,1,1,1,1,1,1,1,1,1],
+    [1,0,1,1,1,1,1,1,1,0,1],
+    [1,0,1,0,0,0,0,0,1,0,1],
+    [0,0,0,1,1,0,1,1,0,0,0],
+  ],
+  crab_b: [
+    [0,0,1,0,0,0,0,0,1,0,0],
+    [1,0,0,1,0,0,0,1,0,0,1],
+    [1,0,1,1,1,1,1,1,1,0,1],
+    [1,1,1,0,1,1,1,0,1,1,1],
+    [1,1,1,1,1,1,1,1,1,1,1],
+    [0,1,1,1,1,1,1,1,1,1,0],
+    [0,0,1,0,0,0,0,0,1,0,0],
+    [0,1,0,0,0,0,0,0,0,1,0],
+  ],
+  octopus_a: [
+    [0,0,0,0,1,1,1,1,0,0,0,0],
+    [0,1,1,1,1,1,1,1,1,1,1,0],
+    [1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,1,1,0,0,1,1,0,0,1,1,1],
+    [1,1,1,1,1,1,1,1,1,1,1,1],
+    [0,0,0,1,1,0,0,1,1,0,0,0],
+    [0,0,1,1,0,1,1,0,1,1,0,0],
+    [1,1,0,0,0,0,0,0,0,0,1,1],
+  ],
+  octopus_b: [
+    [0,0,0,0,1,1,1,1,0,0,0,0],
+    [0,1,1,1,1,1,1,1,1,1,1,0],
+    [1,1,1,1,1,1,1,1,1,1,1,1],
+    [1,1,1,0,0,1,1,0,0,1,1,1],
+    [1,1,1,1,1,1,1,1,1,1,1,1],
+    [0,0,1,1,1,0,0,1,1,1,0,0],
+    [0,1,1,0,0,0,0,0,0,1,1,0],
+    [0,0,1,1,0,0,0,0,1,1,0,0],
+  ],
+  player: [
+    [0,0,0,0,0,1,0,0,0,0,0,0,0],
+    [0,0,0,0,1,1,1,0,0,0,0,0,0],
+    [0,0,0,0,1,1,1,0,0,0,0,0,0],
+    [0,1,1,1,1,1,1,1,1,1,1,0,0],
+    [1,1,1,1,1,1,1,1,1,1,1,1,0],
+    [1,1,1,1,1,1,1,1,1,1,1,1,0],
+    [1,1,1,1,1,1,1,1,1,1,1,1,0],
+    [1,1,1,1,1,1,1,1,1,1,1,1,0],
+  ],
+};
+
+// ─── 스프라이트 캐시 ────────────────────────────
+const sprCache = {};
+function spr(key, color, pw) {
+  const ck = key + color + pw;
+  if (sprCache[ck]) return sprCache[ck];
+  const data = SPR[key];
+  if (!data) return null;
+  const rows = data.length, cols = data[0].length;
+  const oc = new OffscreenCanvas(cols * pw, rows * pw);
+  const ox = oc.getContext('2d');
+  ox.fillStyle = color;
+  for (let r = 0; r < rows; r++)
+    for (let c = 0; c < cols; c++)
+      if (data[r][c]) ox.fillRect(c * pw, r * pw, pw, pw);
+  sprCache[ck] = oc;
+  return oc;
+}
+
+// ═══════════════════════════════════════════════
+//  CONSTANTS
+// ═══════════════════════════════════════════════
+const PW       = 3;   // sprite pixel size
+const E_ROWS   = 5, E_COLS = 11;
+const E_W = 36, E_H = 28, E_GX = 16, E_GY = 14;
+const P_W = 39, P_H = 24, P_SPD = 4;
+const BPW = 3;        // bunker pixel width
+const BPX_W = 28, BPX_H = 20;
+
+// ═══════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════
+let state, score, hiScore = 0, lives, level;
+let player, enemies, bunkers, bulletsP, bulletsE, ufo;
+let eDir, eSpeedBase, eAnimTick, eAnimFrame;
+let ufoTimer, particles, stars;
+let flashAlpha = 0;
+let deadTimer, levelTimer;
+
+// ─── 별 초기화 ──────────────────────────────────
+function initStars() {
+  stars = Array.from({length: 90}, () => ({
+    x:  Math.random() * W,
+    y:  Math.random() * H,
+    r:  Math.random() < 0.25 ? 1.5 : 1,
+    sp: 0.1 + Math.random() * 0.35,
+    a:  0.3 + Math.random() * 0.5,
+  }));
+}
+
+// ─── 방어막 픽셀 맵 생성 ─────────────────────────
+function makeBunkerPixels() {
+  const px = [];
+  for (let r = 0; r < BPX_H; r++) {
+    px.push([]);
+    for (let c = 0; c < BPX_W; c++) {
+      const cutTop    = r < 6  && (c < 4 || c > 23);
+      const cutBottom = r > 14 && c > 8 && c < 19;
+      px[r].push(cutTop || cutBottom ? 0 : 1);
+    }
+  }
+  return px;
+}
+
+// ─── 게임 전체 초기화 ────────────────────────────
+function initGame() {
+  score = 0;
+  lives = 3;
+  level = 1;
+  particles = [];
+  initLevel();
+}
+
+// ─── 레벨 초기화 ─────────────────────────────────
+function initLevel() {
+  player = {
+    x: W / 2 - P_W / 2,
+    y: H - 50,
+    w: P_W, h: P_H,
+    invTimer: 0,
+  };
+
+  // 적 생성
+  const ROW_TYPES  = ['squid','squid','crab','crab','octopus'];
+  const ROW_POINTS = [30, 30, 20, 20, 10];
+  enemies = [];
+  const sx = 42, sy = 58 + Math.min(level - 1, 6) * 5;
+  for (let r = 0; r < E_ROWS; r++)
+    for (let c = 0; c < E_COLS; c++)
+      enemies.push({
+        x: sx + c * (E_W + E_GX),
+        y: sy + r * (E_H + E_GY),
+        w: E_W, h: E_H,
+        type: ROW_TYPES[r],
+        pts:  ROW_POINTS[r],
+        alive: true,
+      });
+
+  // 방어막 생성
+  bunkers = [];
+  const bGap = W / 5;
+  for (let i = 0; i < 4; i++) {
+    const bx = bGap * (i + 1) - (BPX_W * BPW) / 2;
+    const by = H - 110;
+    bunkers.push({ x: bx, y: by, pixels: makeBunkerPixels() });
+  }
+
+  bulletsP  = [];
+  bulletsE  = [];
+  ufo       = null;
+  ufoTimer  = randInt(450, 750);
+  eDir      = 1;
+  eSpeedBase= 1 + (level - 1) * 0.25;
+  eAnimTick = 0;
+  eAnimFrame= 0;
+  deadTimer = 0;
+  levelTimer= 0;
+  flashAlpha= 0;
+  particles = particles || [];
+  state     = 'playing';
+}
+
+// ═══════════════════════════════════════════════
+//  INPUT
+// ═══════════════════════════════════════════════
+const keys = {}, jp = {};
+document.addEventListener('keydown', e => {
+  const c = e.code;
+  if (['ArrowLeft','ArrowRight','Space','KeyR','KeyP'].includes(c)) e.preventDefault();
+  if (!keys[c]) jp[c] = true;
+  keys[c] = true;
+});
+document.addEventListener('keyup', e => { keys[e.code] = false; });
+canvas.addEventListener('click', () => canvas.focus());
+canvas.tabIndex = 0;
+canvas.focus();
+
+// ═══════════════════════════════════════════════
+//  UTILS
+// ═══════════════════════════════════════════════
+function rand(a, b)    { return Math.random() * (b - a) + a; }
+function randInt(a, b) { return Math.floor(rand(a, b + 1)); }
+function aabb(a, b)    {
+  return a.x < b.x + b.w && a.x + a.w > b.x &&
+         a.y < b.y + b.h && a.y + a.h > b.y;
+}
+function outOfBounds(b) { return b.y + b.h < 0 || b.y > H; }
+
+// ═══════════════════════════════════════════════
+//  PARTICLES
+// ═══════════════════════════════════════════════
+function explode(x, y, color, n = 14) {
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 + rand(-0.4, 0.4);
+    const s = rand(1.5, 4.5);
+    particles.push({
+      x, y,
+      vx: Math.cos(a) * s, vy: Math.sin(a) * s,
+      life: randInt(22, 45), maxLife: 45,
+      color, size: rand(1.5, 3.5),
+    });
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  BUNKER COLLISION (pixel-level)
+// ═══════════════════════════════════════════════
+function bulletHitBunker(bullet) {
+  for (const b of bunkers) {
+    const bw = BPX_W * BPW, bh = BPX_H * BPW;
+    if (!aabb(bullet, { x: b.x, y: b.y, w: bw, h: bh })) continue;
+    for (let r = 0; r < BPX_H; r++) {
+      for (let c = 0; c < BPX_W; c++) {
+        if (!b.pixels[r][c]) continue;
+        const px = b.x + c * BPW, py = b.y + r * BPW;
+        if (aabb(bullet, { x: px, y: py, w: BPW, h: BPW })) {
+          for (let dr = -1; dr <= 2; dr++)
+            for (let dc = -1; dc <= 2; dc++) {
+              const nr = r + dr, nc = c + dc;
+              if (nr >= 0 && nr < BPX_H && nc >= 0 && nc < BPX_W)
+                b.pixels[nr][nc] = 0;
+            }
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+// ═══════════════════════════════════════════════
+//  ENEMY MOVEMENT
+// ═══════════════════════════════════════════════
+function updateEnemies() {
+  const alive = enemies.filter(e => e.alive);
+  if (!alive.length) return;
+
+  const ratio   = 1 - alive.length / (E_ROWS * E_COLS);
+  const spd     = eSpeedBase * (1 + ratio * 3.5);
+  const interval= Math.max(3, Math.floor(28 - ratio * 22));
+
+  eAnimTick++;
+  if (eAnimTick < interval) return;
+  eAnimTick  = 0;
+  eAnimFrame = 1 - eAnimFrame;
+
+  for (const e of alive) e.x += spd * eDir;
+
+  const right = Math.max(...alive.map(e => e.x + e.w));
+  const left  = Math.min(...alive.map(e => e.x));
+  if (right >= W - 8 || left <= 8) {
+    eDir *= -1;
+    for (const e of alive) e.y += 18;
+  }
+
+  // 침범 감지
+  for (const e of alive)
+    if (e.y + e.h >= player.y + 8) { state = 'gameover'; hiScore = Math.max(hiScore, score); }
+}
+
+// ═══════════════════════════════════════════════
+//  ENEMY SHOOTING
+// ═══════════════════════════════════════════════
+function enemyShoot() {
+  const alive = enemies.filter(e => e.alive);
+  if (!alive.length) return;
+  const rate = Math.min(0.025, 0.007 + level * 0.002);
+  if (Math.random() > rate) return;
+
+  // 열별 최하단 적
+  const cols = {};
+  for (const e of alive) {
+    const ci = Math.round(e.x);
+    if (!cols[ci] || e.y > cols[ci].y) cols[ci] = e;
+  }
+  const front   = Object.values(cols);
+  const shooter = front[randInt(0, front.length - 1)];
+  bulletsE.push({
+    x: shooter.x + shooter.w / 2 - 2,
+    y: shooter.y + shooter.h,
+    w: 4, h: 14,
+    spd: 5 + level * 0.35,
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  UFO
+// ═══════════════════════════════════════════════
+function updateUFO() {
+  if (!ufo) {
+    if (--ufoTimer <= 0) {
+      ufoTimer = randInt(450, 750);
+      const right = Math.random() < 0.5;
+      ufo = { x: right ? -56 : W + 4, y: 26, w: 56, h: 22,
+               spd: right ? 2.8 : -2.8,
+               pts: [50,100,150,200,300][randInt(0,4)] };
+    }
+  } else {
+    ufo.x += ufo.spd;
+    if (ufo.x > W + 60 || ufo.x < -60) ufo = null;
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  UPDATE
+// ═══════════════════════════════════════════════
+function update() {
+  // 별 이동
+  for (const s of stars) { s.y += s.sp; if (s.y > H) { s.y = 0; s.x = Math.random() * W; } }
+
+  // 파티클
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx; p.y += p.vy; p.vy += 0.09; p.life--;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  // ── 타이틀 ───
+  if (state === 'title') {
+    if (jp['Space']) { initGame(); }
+    return;
+  }
+  // ── 게임오버 ──
+  if (state === 'gameover') {
+    if (jp['KeyR']) initGame();
+    return;
+  }
+  // ── 레벨업 ────
+  if (state === 'levelup') {
+    if (--levelTimer <= 0) { level++; initLevel(); }
+    return;
+  }
+  // ── 사망 대기 ─
+  if (state === 'dead') {
+    if (--deadTimer <= 0) {
+      if (lives <= 0) { state = 'gameover'; hiScore = Math.max(hiScore, score); }
+      else initLevel();
+    }
+    return;
+  }
+  // ── 일시정지 ──
+  if (state === 'paused') {
+    if (jp['KeyP']) state = 'playing';
+    return;
+  }
+
+  // ── 플레이 ────
+  if (keys['ArrowLeft'])  player.x = Math.max(0,        player.x - P_SPD);
+  if (keys['ArrowRight']) player.x = Math.min(W - P_W,  player.x + P_SPD);
+  if (jp['Space'] && bulletsP.length < 2)
+    bulletsP.push({ x: player.x + P_W/2 - 1.5, y: player.y, w: 3, h: 14, spd: -11 });
+  if (jp['KeyP']) state = 'paused';
+  if (player.invTimer > 0) player.invTimer--;
+
+  // 플레이어 총알
+  for (let i = bulletsP.length - 1; i >= 0; i--) {
+    const b = bulletsP[i];
+    b.y += b.spd;
+    if (outOfBounds(b)) { bulletsP.splice(i, 1); continue; }
+    if (bulletHitBunker(b)) { bulletsP.splice(i, 1); continue; }
+
+    // vs UFO
+    if (ufo && aabb(b, ufo)) {
+      explode(ufo.x + ufo.w/2, ufo.y + ufo.h/2, COL.ufo, 20);
+      score += ufo.pts; ufo = null; flashAlpha = 0.45;
+      bulletsP.splice(i, 1); continue;
+    }
+
+    // vs 적
+    let hit = false;
+    for (const e of enemies) {
+      if (!e.alive || !aabb(b, e)) continue;
+      e.alive = false;
+      score  += e.pts;
+      const c = e.type==='squid'?COL.squid : e.type==='crab'?COL.crab : COL.octopus;
+      explode(e.x+e.w/2, e.y+e.h/2, c, 15);
+      flashAlpha = 0.18;
+      hit = true; break;
+    }
+    if (hit) { bulletsP.splice(i, 1); continue; }
+  }
+
+  // 적 총알
+  for (let i = bulletsE.length - 1; i >= 0; i--) {
+    const b = bulletsE[i];
+    b.y += b.spd;
+    if (outOfBounds(b)) { bulletsE.splice(i, 1); continue; }
+    if (bulletHitBunker(b)) { bulletsE.splice(i, 1); continue; }
+
+    if (player.invTimer <= 0 && aabb(b, player)) {
+      explode(player.x+P_W/2, player.y+P_H/2, COL.player, 22);
+      lives--; flashAlpha = 0.65;
+      bulletsE.splice(i, 1);
+      state = 'dead'; deadTimer = 110; continue;
+    }
+  }
+
+  enemyShoot();
+  updateEnemies();
+  updateUFO();
+  if (flashAlpha > 0) flashAlpha -= 0.02;
+
+  // 클리어
+  if (state==='playing' && enemies.every(e=>!e.alive)) {
+    state = 'levelup'; levelTimer = 100;
+  }
+
+  // HUD
+  document.getElementById('h-score').textContent = score;
+  document.getElementById('h-hi').textContent    = Math.max(score, hiScore);
+  document.getElementById('h-level').textContent = level;
+  document.getElementById('h-lives').textContent = '♥ '.repeat(Math.max(0,lives)).trim() || '—';
+}
+
+// ═══════════════════════════════════════════════
+//  DRAW
+// ═══════════════════════════════════════════════
+function draw() {
+  // 배경
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+
+  // 그리드
+  ctx.strokeStyle = COL.grid; ctx.lineWidth = 0.5;
+  for (let x = 0; x < W; x += 40) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); }
+  for (let y = 0; y < H; y += 40) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); }
+
+  // 별
+  for (const s of stars) {
+    ctx.globalAlpha = s.a * (0.7 + Math.random() * 0.3);
+    ctx.fillStyle   = '#ffffff';
+    ctx.fillRect(s.x, s.y, s.r, s.r);
+  }
+  ctx.globalAlpha = 1;
+
+  // 지상선
+  ctx.fillStyle = '#00ff88';
+  ctx.fillRect(0, H - 28, W, 2);
+
+  // 방어막
+  ctx.fillStyle = COL.bunker;
+  for (const b of bunkers)
+    for (let r = 0; r < BPX_H; r++)
+      for (let c = 0; c < BPX_W; c++)
+        if (b.pixels[r][c])
+          ctx.fillRect(b.x + c*BPW, b.y + r*BPW, BPW, BPW);
+
+  // 적
+  for (const e of enemies) {
+    if (!e.alive) continue;
+    const key   = e.type + '_' + (eAnimFrame ? 'b' : 'a');
+    const color = e.type==='squid' ? COL.squid : e.type==='crab' ? COL.crab : COL.octopus;
+    const img   = spr(key, color, PW);
+    if (img) ctx.drawImage(img, e.x, e.y);
+  }
+
+  // UFO
+  if (ufo) {
+    const t = Date.now() / 120;
+    ctx.fillStyle = COL.ufo;
+    ctx.fillRect(ufo.x+18, ufo.y,      20, 7);
+    ctx.fillRect(ufo.x+ 8, ufo.y+ 7,   40, 9);
+    ctx.fillRect(ufo.x,    ufo.y+12,   56, 7);
+    ctx.fillRect(ufo.x+ 8, ufo.y+17,   40, 5);
+    ctx.fillStyle = '#ff99ff';
+    for (let i=0;i<3;i++) ctx.fillRect(ufo.x+12+i*14, ufo.y+9, 7, 4);
+    ctx.fillStyle = COL.ufo;
+    ctx.globalAlpha = 0.08 + Math.sin(t)*0.05;
+    ctx.fillRect(ufo.x+8, ufo.y+22, 40, H-ufo.y-22);
+    ctx.globalAlpha = 1;
+  }
+
+  // 플레이어 (사망 시 깜빡임)
+  const showP = state !== 'dead' || (Math.floor(Date.now()/80) % 2 === 0);
+  if (showP) {
+    const img = spr('player', COL.player, PW);
+    if (img) ctx.drawImage(img, player.x, player.y);
+    // 엔진 글로우
+    const t = Date.now() / 70;
+    ctx.fillStyle   = COL.player;
+    ctx.globalAlpha = 0.2 + Math.sin(t)*0.1;
+    ctx.fillRect(player.x + P_W/2 - 7, player.y + P_H - 1, 14, 5);
+    ctx.globalAlpha = 1;
+  }
+
+  // 플레이어 총알
+  ctx.shadowColor = COL.bullet_p; ctx.shadowBlur = 10;
+  ctx.fillStyle   = COL.bullet_p;
+  for (const b of bulletsP) ctx.fillRect(b.x, b.y, b.w, b.h);
+
+  // 적 총알
+  ctx.shadowColor = COL.bullet_e; ctx.shadowBlur = 10;
+  ctx.fillStyle   = COL.bullet_e;
+  for (const b of bulletsE) ctx.fillRect(b.x, b.y, b.w, b.h);
+  ctx.shadowBlur = 0;
+
+  // 파티클
+  for (const p of particles) {
+    ctx.globalAlpha = p.life / p.maxLife;
+    ctx.fillStyle   = p.color;
+    ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+  }
+  ctx.globalAlpha = 1;
+
+  // CRT 스캔라인
+  ctx.fillStyle = 'rgba(0,0,0,0.06)';
+  for (let y = 0; y < H; y += 3) ctx.fillRect(0, y, W, 1);
+
+  // 플래시
+  if (flashAlpha > 0) {
+    ctx.fillStyle = `rgba(255,255,255,${flashAlpha.toFixed(2)})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // ── 타이틀 점수표 ───
+  if (state === 'title') {
+    const items = [
+      {key:'squid_a',   c:COL.squid,   label:'= 30 PTS'},
+      {key:'crab_a',    c:COL.crab,    label:'= 20 PTS'},
+      {key:'octopus_a', c:COL.octopus, label:'= 10 PTS'},
+    ];
+    let ty = H/2 + 60;
+    ctx.font = '9px "Press Start 2P", monospace';
+    for (const it of items) {
+      const img = spr(it.key, it.c, 2);
+      if (img) ctx.drawImage(img, W/2-90, ty-10, img.width, img.height);
+      ctx.fillStyle = it.c;
+      ctx.fillText(it.label, W/2-20, ty+4);
+      ty += 38;
+    }
+    ctx.fillStyle = COL.ufo;
+    ctx.fillText('UFO  = ???', W/2 - 70, ty + 4);
+  }
+
+  // ── 오버레이 ────────────────────────────────────
+  const msgs = {
+    title: `SPACE INVADERS<br><br><span class="blink" style="font-size:10px;color:#00ff88">PRESS SPACE TO START</span>`,
+    gameover: `<span style="color:#ff4466">GAME OVER</span><br><br>
+               <span style="font-size:9px;color:#888">SCORE ${score}</span><br><br>
+               <span class="blink" style="font-size:8px;color:#00ff88">PRESS R TO RESTART</span>`,
+    levelup:  `<span style="color:#ffcc00">STAGE ${level} CLEAR!</span><br><br>
+               <span style="font-size:10px;color:#00ff88">STAGE ${level+1}...</span>`,
+    paused:   `<span style="color:#ffcc00">PAUSED</span><br><br>
+               <span style="font-size:9px;color:#00ff88">PRESS P TO RESUME</span>`,
+  };
+  if (msgs[state]) {
+    overlay.innerHTML      = msgs[state];
+    overlay.style.display  = 'block';
+  } else {
+    overlay.style.display  = 'none';
+  }
+}
+
+// ═══════════════════════════════════════════════
+//  LOOP
+// ═══════════════════════════════════════════════
+function loop() {
+  update();
+  draw();
+  // justPressed 초기화
+  for (const k in jp) delete jp[k];
+  requestAnimationFrame(loop);
+}
+
+// ═══════════════════════════════════════════════
+//  START
+// ═══════════════════════════════════════════════
+initStars();
+particles = [];
+state = 'title';
+score = 0; lives = 3; level = 1;
+// 타이틀용 더미 플레이어·방어막
+player   = { x: W/2-P_W/2, y: H-50, w: P_W, h: P_H, invTimer: 0 };
+enemies  = [];
+bunkers  = [];
+bulletsP = []; bulletsE = [];
+ufo = null; ufoTimer = 600;
+eAnimFrame = 0;
+
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
