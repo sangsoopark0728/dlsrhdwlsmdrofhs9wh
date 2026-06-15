@@ -1,0 +1,1376 @@
+#!/usr/bin/env python3
+"""
+📚 Study Timer App - 축약 버전
+오늘 공부 시간표 + 주간 계획표 + 타이머
+"""
+
+import os
+import sys
+import json
+import time
+import math
+import tkinter as tk
+from tkinter import messagebox
+
+
+# =========================
+# 색상 / 기본 설정
+# =========================
+
+BG = "#0f1117"
+SIDEBAR_BG = "#161b22"
+CARD_BG = "#1c2333"
+BORDER = "#30363d"
+TEXT = "#e6edf3"
+TEXT_DIM = "#8b949e"
+ACCENT = "#58a6ff"
+SUCCESS = "#3fb950"
+WARNING = "#d29922"
+DANGER = "#f85149"
+LIGHT_RED = "#ff7b7b"
+
+SUBJECT_COLORS = [
+    "#58a6ff", "#3fb950", "#f78166", "#d2a8ff", "#ffa657",
+    "#79c0ff", "#56d364", "#ff7b72", "#e3b341", "#bc8cff",
+]
+
+CHARACTERS = {
+    "turtle": ("🐢", "거북이"),
+    "rabbit": ("🐰", "토끼"),
+    "dinosaur": ("🦖", "공룡"),
+    "dog": ("🐶", "강아지"),
+    "cat": ("🐱", "고양이"),
+}
+
+PROPS = {
+    "box": ("📦", "박스"),
+    "ball": ("⚽", "공"),
+}
+
+DAY_KEYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+DAYS_KR = ["월", "화", "수", "목", "금", "토", "일"]
+
+FRAME_MS = 50
+
+
+# =========================
+# 저장 경로
+# =========================
+
+def get_save_path():
+    if getattr(sys, "frozen", False):
+        base = os.path.dirname(sys.executable)
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, "weekly_plan.json")
+
+
+# =========================
+# 공통 유틸
+# =========================
+
+def darken(color, factor=0.7):
+    h = color.lstrip("#")
+    r = int(h[0:2], 16)
+    g = int(h[2:4], 16)
+    b = int(h[4:6], 16)
+    return f"#{int(r * factor):02x}{int(g * factor):02x}{int(b * factor):02x}"
+
+
+def lighten(color, amount=30):
+    h = color.lstrip("#")
+    r = min(255, int(h[0:2], 16) + amount)
+    g = min(255, int(h[2:4], 16) + amount)
+    b = min(255, int(h[4:6], 16) + amount)
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+# =========================
+# 스플래시 화면
+# =========================
+
+class SplashScreen(tk.Toplevel):
+    def __init__(self, parent, on_done):
+        super().__init__(parent)
+        self.parent = parent
+        self.on_done = on_done
+        self.alpha = 0.0
+        self.phase = "in"
+        self.hold = 0
+
+        self.overrideredirect(True)
+        self.configure(bg="#0d1117")
+        self.attributes("-alpha", 0.0)
+        self.attributes("-topmost", True)
+
+        w, h = 520, 320
+        x = (parent.winfo_screenwidth() - w) // 2
+        y = (parent.winfo_screenheight() - h) // 2
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
+        tk.Label(
+            self,
+            text="📚",
+            font=("Segoe UI Emoji", 64),
+            bg="#0d1117",
+            fg=ACCENT
+        ).pack(pady=(70, 10))
+
+        tk.Label(
+            self,
+            text="Study Timer",
+            font=("Georgia", 26, "bold"),
+            bg="#0d1117",
+            fg=TEXT
+        ).pack()
+
+        tk.Label(
+            self,
+            text="공부 타이머",
+            font=("Malgun Gothic", 13),
+            bg="#0d1117",
+            fg=TEXT_DIM
+        ).pack(pady=(8, 0))
+
+        self.after(30, self.tick)
+
+    def tick(self):
+        if self.phase == "in":
+            self.alpha += 0.1
+            self.attributes("-alpha", min(self.alpha, 1.0))
+            if self.alpha >= 1.0:
+                self.phase = "hold"
+
+        elif self.phase == "hold":
+            self.hold += 1
+            if self.hold >= 25:
+                self.phase = "out"
+
+        elif self.phase == "out":
+            self.alpha -= 0.1
+            self.attributes("-alpha", max(self.alpha, 0.0))
+            if self.alpha <= 0:
+                self.destroy()
+                self.on_done()
+                return
+
+        self.after(30, self.tick)
+
+
+# =========================
+# 커스텀 확인창
+# =========================
+
+class StyledDialog(tk.Toplevel):
+    def __init__(self, parent, title, message, buttons, icon="❓"):
+        super().__init__(parent)
+        self.result = None
+
+        self.title(title)
+        self.configure(bg=BG)
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        w, h = 440, 250
+        parent.update_idletasks()
+        x = parent.winfo_rootx() + parent.winfo_width() // 2 - w // 2
+        y = parent.winfo_rooty() + parent.winfo_height() // 2 - h // 2
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
+        card = tk.Frame(
+            self,
+            bg=CARD_BG,
+            highlightthickness=1,
+            highlightbackground=BORDER
+        )
+        card.pack(fill="both", expand=True, padx=18, pady=18)
+
+        tk.Label(
+            card,
+            text=icon,
+            font=("Segoe UI Emoji", 34),
+            bg=CARD_BG,
+            fg=ACCENT
+        ).pack(pady=(18, 4))
+
+        tk.Label(
+            card,
+            text=title,
+            font=("Malgun Gothic", 14, "bold"),
+            bg=CARD_BG,
+            fg=TEXT
+        ).pack()
+
+        tk.Label(
+            card,
+            text=message,
+            font=("Malgun Gothic", 11),
+            bg=CARD_BG,
+            fg=TEXT_DIM,
+            wraplength=360,
+            justify="center"
+        ).pack(pady=(10, 18))
+
+        btn_frame = tk.Frame(card, bg=CARD_BG)
+        btn_frame.pack()
+
+        for label, color, value in buttons:
+            tk.Button(
+                btn_frame,
+                text=label,
+                font=("Malgun Gothic", 10, "bold"),
+                bg=color,
+                fg="#000000" if color != CARD_BG else TEXT,
+                activebackground=lighten(color),
+                relief="flat",
+                cursor="hand2",
+                padx=20,
+                pady=7,
+                bd=0,
+                command=lambda v=value: self.close(v)
+            ).pack(side="left", padx=6)
+
+        self.protocol("WM_DELETE_WINDOW", lambda: self.close(None))
+        self.wait_window()
+
+    def close(self, value):
+        self.result = value
+        self.destroy()
+
+# =========================
+# 메인 앱
+# =========================
+
+class StudyTimerApp(tk.Tk):
+
+    def __init__(self):
+        super().__init__()
+
+        self.title("📚 Study Timer")
+        self.geometry("1200x750")
+        self.configure(bg=BG)
+
+        self.subjects = []
+        self.weekly_plan = {k: [] for k in DAY_KEYS}
+
+        self.character = tk.StringVar(value="turtle")
+        self.prop = tk.StringVar(value="box")
+
+        self.current_tab = tk.StringVar(value="today")
+        self.selected_day = tk.StringVar(value="mon")
+
+        self.timer_running = False
+        self.timer_paused = False
+
+        self.current_subject = 0
+        self.total_secs = 0
+        self.elapsed_pause = 0
+        self.start_mono = 0
+
+        self.load_weekly_plan()
+
+        self.build_ui()
+        self.show_splash()
+
+    # ---------------------
+    # 저장 / 불러오기
+    # ---------------------
+
+    def load_weekly_plan(self):
+        try:
+            with open(get_save_path(), "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            for k in DAY_KEYS:
+                if k in data:
+                    self.weekly_plan[k] = data[k]
+
+        except:
+            pass
+
+    def save_weekly_plan(self):
+        with open(
+            get_save_path(),
+            "w",
+            encoding="utf-8"
+        ) as f:
+            json.dump(
+                self.weekly_plan,
+                f,
+                ensure_ascii=False,
+                indent=2
+            )
+
+    # ---------------------
+    # 스플래시
+    # ---------------------
+
+    def show_splash(self):
+        self.withdraw()
+
+        def reveal():
+            self.deiconify()
+
+        SplashScreen(self, reveal)
+
+    # ---------------------
+    # UI 생성
+    # ---------------------
+
+    def build_ui(self):
+        self.build_sidebar()
+        self.build_main()
+
+    # ---------------------
+    # 사이드바
+    # ---------------------
+
+    def build_sidebar(self):
+
+        self.sidebar = tk.Frame(
+            self,
+            bg=SIDEBAR_BG,
+            width=260
+        )
+
+        self.sidebar.pack(
+            side="left",
+            fill="y"
+        )
+
+        self.sidebar.pack_propagate(False)
+
+        tk.Label(
+            self.sidebar,
+            text="📚",
+            font=("Segoe UI Emoji", 26),
+            bg=SIDEBAR_BG,
+            fg=TEXT
+        ).pack(pady=(20, 0))
+
+        tk.Label(
+            self.sidebar,
+            text="Study Timer",
+            font=("Georgia", 13, "bold"),
+            bg=SIDEBAR_BG,
+            fg=TEXT
+        ).pack()
+
+        tk.Label(
+            self.sidebar,
+            text="공부 타이머",
+            font=("Malgun Gothic", 9),
+            bg=SIDEBAR_BG,
+            fg=TEXT_DIM
+        ).pack(pady=(0, 15))
+
+        self.divider()
+
+        self.section_label("🐾 캐릭터")
+
+        for key, value in CHARACTERS.items():
+            icon, name = value
+
+            tk.Radiobutton(
+                self.sidebar,
+                text=f"{icon} {name}",
+                variable=self.character,
+                value=key,
+                bg=SIDEBAR_BG,
+                fg=TEXT,
+                selectcolor=CARD_BG,
+                activebackground=SIDEBAR_BG
+            ).pack(anchor="w", padx=20)
+
+        self.divider()
+
+        self.section_label("📦 소품")
+
+        for key, value in PROPS.items():
+            icon, name = value
+
+            tk.Radiobutton(
+                self.sidebar,
+                text=f"{icon} {name}",
+                variable=self.prop,
+                value=key,
+                bg=SIDEBAR_BG,
+                fg=TEXT,
+                selectcolor=CARD_BG,
+                activebackground=SIDEBAR_BG
+            ).pack(anchor="w", padx=20)
+
+        self.divider()
+
+        self.section_label("➕ 과목 추가")
+
+        tk.Label(
+            self.sidebar,
+            text="과목명",
+            bg=SIDEBAR_BG,
+            fg=TEXT_DIM
+        ).pack(anchor="w", padx=20)
+
+        self.entry_subject = tk.Entry(
+            self.sidebar
+        )
+        self.entry_subject.pack(
+            fill="x",
+            padx=20,
+            pady=(0, 10)
+        )
+
+        tk.Label(
+            self.sidebar,
+            text="공부 시간(분)",
+            bg=SIDEBAR_BG,
+            fg=TEXT_DIM
+        ).pack(anchor="w", padx=20)
+
+        self.entry_minutes = tk.Entry(
+            self.sidebar
+        )
+
+        self.entry_minutes.pack(
+            fill="x",
+            padx=20,
+            pady=(0, 10)
+        )
+
+        tk.Button(
+            self.sidebar,
+            text="+ 과목 추가",
+            bg=ACCENT,
+            fg="#000000",
+            relief="flat",
+            cursor="hand2",
+            command=self.add_subject
+        ).pack(
+            fill="x",
+            padx=20,
+            pady=10
+        )
+
+    # ---------------------
+    # 공통 UI
+    # ---------------------
+
+    def divider(self):
+        tk.Frame(
+            self.sidebar,
+            bg=BORDER,
+            height=1
+        ).pack(
+            fill="x",
+            padx=15,
+            pady=12
+        )
+
+    def section_label(self, text):
+        tk.Label(
+            self.sidebar,
+            text=text,
+            font=("Malgun Gothic", 10, "bold"),
+            bg=SIDEBAR_BG,
+            fg=TEXT
+        ).pack(
+            anchor="w",
+            padx=15,
+            pady=(0, 8)
+        )
+
+    # ---------------------
+    # 메인 영역
+    # ---------------------
+
+    def build_main(self):
+        self.main = tk.Frame(self, bg=BG)
+        self.main.pack(side="left", fill="both", expand=True)
+
+        self.build_tab_header()
+        self.build_today_view()
+        self.build_weekly_view()
+        self.build_timer_view()
+
+        self.switch_tab("today")
+
+    def build_tab_header(self):
+        self.tab_header = tk.Frame(self.main, bg=SIDEBAR_BG, height=52)
+        self.tab_header.pack(fill="x")
+        self.tab_header.pack_propagate(False)
+
+        self.tab_today_btn = tk.Button(
+            self.tab_header,
+            text="📅 오늘의 공부 시간표",
+            font=("Malgun Gothic", 11, "bold"),
+            bg=ACCENT,
+            fg="#000000",
+            relief="flat",
+            cursor="hand2",
+            command=lambda: self.switch_tab("today")
+        )
+        self.tab_today_btn.pack(side="left", padx=(25, 6), pady=9)
+
+        self.tab_weekly_btn = tk.Button(
+            self.tab_header,
+            text="🗓 주간 계획표",
+            font=("Malgun Gothic", 11, "bold"),
+            bg=CARD_BG,
+            fg=TEXT_DIM,
+            relief="flat",
+            cursor="hand2",
+            command=lambda: self.switch_tab("weekly")
+        )
+        self.tab_weekly_btn.pack(side="left", pady=9)
+
+    def switch_tab(self, tab):
+        self.current_tab.set(tab)
+
+        self.today_view.pack_forget()
+        self.weekly_view.pack_forget()
+        self.timer_view.pack_forget()
+
+        if tab == "today":
+            self.tab_today_btn.config(bg=ACCENT, fg="#000000")
+            self.tab_weekly_btn.config(bg=CARD_BG, fg=TEXT_DIM)
+            self.today_view.pack(fill="both", expand=True)
+        else:
+            self.tab_today_btn.config(bg=CARD_BG, fg=TEXT_DIM)
+            self.tab_weekly_btn.config(bg=ACCENT, fg="#000000")
+            self.weekly_view.pack(fill="both", expand=True)
+            self.refresh_weekly_view()
+
+    # ---------------------
+    # 오늘의 공부 시간표
+    # ---------------------
+
+    def build_today_view(self):
+        self.today_view = tk.Frame(self.main, bg=BG)
+
+        header = tk.Frame(self.today_view, bg=BG)
+        header.pack(fill="x", padx=32, pady=(24, 0))
+
+        tk.Label(
+            header,
+            text="오늘의 공부 시간표",
+            font=("Georgia", 22, "bold"),
+            bg=BG,
+            fg=TEXT
+        ).pack(anchor="w")
+
+        tk.Label(
+            header,
+            text="왼쪽에서 과목을 추가하고 타이머를 시작하세요.",
+            font=("Malgun Gothic", 11),
+            bg=BG,
+            fg=TEXT_DIM
+        ).pack(anchor="w", pady=(4, 0))
+
+        self.subject_list_frame = tk.Frame(self.today_view, bg=BG)
+        self.subject_list_frame.pack(fill="both", expand=True, padx=32, pady=20)
+
+        bottom = tk.Frame(self.today_view, bg=BG)
+        bottom.pack(fill="x", padx=32, pady=(0, 25))
+
+        tk.Button(
+            bottom,
+            text="▶ 타이머 시작",
+            font=("Malgun Gothic", 15, "bold"),
+            bg=LIGHT_RED,
+            fg="#000000",
+            relief="flat",
+            cursor="hand2",
+            padx=30,
+            pady=14,
+            command=self.start_timer
+        ).pack(side="right")
+
+        self.refresh_subject_list()
+
+    def refresh_subject_list(self):
+        for w in self.subject_list_frame.winfo_children():
+            w.destroy()
+
+        if not self.subjects:
+            tk.Label(
+                self.subject_list_frame,
+                text="아직 과목이 없습니다.\n왼쪽 메뉴에서 과목을 추가해주세요.",
+                font=("Malgun Gothic", 13),
+                bg=BG,
+                fg=TEXT_DIM,
+                justify="center"
+            ).pack(pady=70)
+            return
+
+        for i, subj in enumerate(self.subjects):
+            self.subject_card(
+                parent=self.subject_list_frame,
+                subj=subj,
+                index=i,
+                removable=True
+            )
+
+    # ---------------------
+    # 주간 계획표
+    # ---------------------
+
+    def build_weekly_view(self):
+        self.weekly_view = tk.Frame(self.main, bg=BG)
+
+        header = tk.Frame(self.weekly_view, bg=BG)
+        header.pack(fill="x", padx=32, pady=(24, 0))
+
+        tk.Label(
+            header,
+            text="주간 계획표",
+            font=("Georgia", 22, "bold"),
+            bg=BG,
+            fg=TEXT
+        ).pack(anchor="w")
+
+        tk.Label(
+            header,
+            text="요일을 선택하고 왼쪽에서 과목을 추가하세요.",
+            font=("Malgun Gothic", 11),
+            bg=BG,
+            fg=TEXT_DIM
+        ).pack(anchor="w", pady=(4, 0))
+
+        day_frame = tk.Frame(self.weekly_view, bg=BG)
+        day_frame.pack(fill="x", padx=32, pady=(16, 8))
+
+        self.day_buttons = {}
+
+        for dk, kr in zip(DAY_KEYS, DAYS_KR):
+            btn = tk.Button(
+                day_frame,
+                text=kr,
+                font=("Malgun Gothic", 12, "bold"),
+                bg=CARD_BG,
+                fg=TEXT_DIM,
+                relief="flat",
+                cursor="hand2",
+                width=4,
+                command=lambda d=dk: self.select_day(d)
+            )
+            btn.pack(side="left", padx=3)
+            self.day_buttons[dk] = btn
+
+        self.weekly_content = tk.Frame(self.weekly_view, bg=BG)
+        self.weekly_content.pack(fill="both", expand=True, padx=32, pady=10)
+
+        self.select_day("mon")
+
+    def select_day(self, day):
+        self.selected_day.set(day)
+
+        for dk, btn in self.day_buttons.items():
+            if dk == day:
+                btn.config(bg=ACCENT, fg="#000000")
+            else:
+                btn.config(bg=CARD_BG, fg=TEXT_DIM)
+
+        self.refresh_weekly_view()
+
+    def refresh_weekly_view(self):
+        for w in self.weekly_content.winfo_children():
+            w.destroy()
+
+        day = self.selected_day.get()
+        day_index = DAY_KEYS.index(day)
+        kr = DAYS_KR[day_index]
+
+        subjects = self.weekly_plan[day]
+        total = sum(s["minutes"] for s in subjects)
+
+        tk.Label(
+            self.weekly_content,
+            text=f"{kr}요일 계획  |  총 {total}분",
+            font=("Malgun Gothic", 16, "bold"),
+            bg=BG,
+            fg=ACCENT
+        ).pack(anchor="w", pady=(0, 15))
+
+        if not subjects:
+            tk.Label(
+                self.weekly_content,
+                text=f"아직 {kr}요일 계획이 없습니다.",
+                font=("Malgun Gothic", 13),
+                bg=BG,
+                fg=TEXT_DIM
+            ).pack(pady=60)
+            return
+
+        for i, subj in enumerate(subjects):
+            self.subject_card(
+                parent=self.weekly_content,
+                subj=subj,
+                index=i,
+                removable=True,
+                weekly_day=day
+            )
+
+    # ---------------------
+    # 과목 추가 / 삭제
+    # ---------------------
+
+    def add_subject(self):
+        name = self.entry_subject.get().strip()
+        minutes = self.entry_minutes.get().strip()
+
+        if not name:
+            messagebox.showwarning("입력 오류", "과목명을 입력해주세요.")
+            return
+
+        try:
+            minutes = int(minutes)
+            if minutes <= 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showwarning("입력 오류", "공부 시간은 양수로 입력해주세요.")
+            return
+
+        data = {
+            "name": name,
+            "minutes": minutes,
+            "character": self.character.get(),
+            "prop": self.prop.get(),
+        }
+
+        if self.current_tab.get() == "today":
+            data["color"] = SUBJECT_COLORS[len(self.subjects) % len(SUBJECT_COLORS)]
+            data["elapsed_secs"] = 0
+            data["completed"] = False
+
+            self.subjects.append(data)
+            self.refresh_subject_list()
+
+        else:
+            day = self.selected_day.get()
+            data["color"] = SUBJECT_COLORS[len(self.weekly_plan[day]) % len(SUBJECT_COLORS)]
+
+            self.weekly_plan[day].append(data)
+            self.save_weekly_plan()
+            self.refresh_weekly_view()
+
+        self.entry_subject.delete(0, "end")
+        self.entry_minutes.delete(0, "end")
+
+    def remove_subject(self, index):
+        if self.timer_running:
+            messagebox.showinfo("안내", "타이머 실행 중에는 삭제할 수 없습니다.")
+            return
+
+        self.subjects.pop(index)
+
+        for i, s in enumerate(self.subjects):
+            s["color"] = SUBJECT_COLORS[i % len(SUBJECT_COLORS)]
+
+        self.refresh_subject_list()
+
+    def remove_weekly_subject(self, day, index):
+        self.weekly_plan[day].pop(index)
+
+        for i, s in enumerate(self.weekly_plan[day]):
+            s["color"] = SUBJECT_COLORS[i % len(SUBJECT_COLORS)]
+
+        self.save_weekly_plan()
+        self.refresh_weekly_view()
+
+    # ---------------------
+    # 과목 카드 공통 함수
+    # ---------------------
+
+    def subject_card(self, parent, subj, index, removable=False, weekly_day=None):
+        card = tk.Frame(
+            parent,
+            bg=CARD_BG,
+            highlightthickness=1,
+            highlightbackground=BORDER
+        )
+        card.pack(fill="x", pady=5)
+
+        color = subj.get("color", ACCENT)
+
+        tk.Frame(
+            card,
+            bg=color,
+            width=6
+        ).pack(side="left", fill="y")
+
+        body = tk.Frame(
+            card,
+            bg=CARD_BG,
+            padx=16,
+            pady=12
+        )
+        body.pack(side="left", fill="both", expand=True)
+
+        row1 = tk.Frame(body, bg=CARD_BG)
+        row1.pack(fill="x")
+
+        tk.Label(
+            row1,
+            text=f"{index + 1:02d}.",
+            font=("Courier New", 14, "bold"),
+            bg=CARD_BG,
+            fg=color,
+            width=3,
+            anchor="w"
+        ).pack(side="left")
+
+        tk.Label(
+            row1,
+            text=subj["name"],
+            font=("Malgun Gothic", 14, "bold"),
+            bg=CARD_BG,
+            fg=TEXT
+        ).pack(side="left", padx=6)
+
+        if removable:
+            if weekly_day:
+                cmd = lambda: self.remove_weekly_subject(weekly_day, index)
+            else:
+                cmd = lambda: self.remove_subject(index)
+
+            tk.Button(
+                row1,
+                text="✕",
+                font=("Malgun Gothic", 10, "bold"),
+                bg=CARD_BG,
+                fg=DANGER,
+                activebackground=CARD_BG,
+                relief="flat",
+                cursor="hand2",
+                bd=0,
+                command=cmd
+            ).pack(side="right")
+
+        row2 = tk.Frame(body, bg=CARD_BG)
+        row2.pack(fill="x", pady=(7, 0))
+
+        tk.Label(
+            row2,
+            text=f"⏱ {subj['minutes']}분",
+            font=("Malgun Gothic", 11),
+            bg=CARD_BG,
+            fg=TEXT_DIM
+        ).pack(side="left")
+
+        if "elapsed_secs" in subj:
+            total_secs = subj["minutes"] * 60
+            elapsed = subj.get("elapsed_secs", 0)
+            progress = min(elapsed / total_secs, 1.0) if total_secs else 0
+
+            if subj.get("completed"):
+                progress_text = "완료"
+                progress_color = SUCCESS
+            else:
+                progress_text = f"{int(progress * 100)}%"
+                progress_color = TEXT_DIM
+
+            tk.Label(
+                row2,
+                text=f"  |  진행도 {progress_text}",
+                font=("Malgun Gothic", 11),
+                bg=CARD_BG,
+                fg=progress_color
+            ).pack(side="left")
+
+        char_key = subj.get("character", "turtle")
+        prop_key = subj.get("prop", "box")
+
+        char_icon, char_name = CHARACTERS.get(char_key, ("🐢", "거북이"))
+        prop_icon, prop_name = PROPS.get(prop_key, ("📦", "박스"))
+
+        tk.Label(
+            row2,
+            text=f"  |  {char_icon} {char_name} + {prop_icon} {prop_name}",
+            font=("Malgun Gothic", 10),
+            bg=CARD_BG,
+            fg=color
+        ).pack(side="left")
+
+    # ---------------------
+    # 타이머 화면 UI
+    # ---------------------
+
+    def build_timer_view(self):
+        self.timer_view = tk.Frame(self.main, bg=BG)
+
+        top_bar = tk.Frame(self.timer_view, bg=BG)
+        top_bar.pack(fill="x", padx=24, pady=(16, 0))
+
+        tk.Button(
+            top_bar,
+            text="🏠 메인화면",
+            font=("Malgun Gothic", 10, "bold"),
+            bg=CARD_BG,
+            fg=TEXT,
+            activebackground=BORDER,
+            relief="flat",
+            cursor="hand2",
+            padx=14,
+            pady=6,
+            bd=0,
+            command=self.go_main_from_timer
+        ).pack(side="left")
+
+        self.lbl_subject_name = tk.Label(
+            self.timer_view,
+            text="",
+            font=("Georgia", 22, "bold"),
+            bg=BG,
+            fg=ACCENT
+        )
+        self.lbl_subject_name.pack(pady=(30, 4))
+
+        self.lbl_subject_index = tk.Label(
+            self.timer_view,
+            text="",
+            font=("Malgun Gothic", 11),
+            bg=BG,
+            fg=TEXT_DIM
+        )
+        self.lbl_subject_index.pack()
+
+        self.lbl_char_prop = tk.Label(
+            self.timer_view,
+            text="",
+            font=("Malgun Gothic", 13),
+            bg=BG,
+            fg=TEXT_DIM
+        )
+        self.lbl_char_prop.pack(pady=(4, 0))
+
+        self.lbl_timer = tk.Label(
+            self.timer_view,
+            text="00:00",
+            font=("Courier New", 72, "bold"),
+            bg=BG,
+            fg=TEXT
+        )
+        self.lbl_timer.pack(pady=(10, 0))
+
+        progress_frame = tk.Frame(
+            self.timer_view,
+            bg=BG,
+            padx=50
+        )
+        progress_frame.pack(fill="x", pady=(5, 0))
+
+        self.progress_canvas = tk.Canvas(
+            progress_frame,
+            height=10,
+            bg=CARD_BG,
+            highlightthickness=0
+        )
+        self.progress_canvas.pack(fill="x")
+
+        self.progress_bar = self.progress_canvas.create_rectangle(
+            0,
+            0,
+            0,
+            10,
+            fill=ACCENT,
+            outline=""
+        )
+
+        self.anim_canvas = tk.Canvas(
+            self.timer_view,
+            height=150,
+            bg=CARD_BG,
+            highlightthickness=1,
+            highlightbackground=BORDER
+        )
+        self.anim_canvas.pack(fill="x", padx=50, pady=(25, 0))
+
+        controls = tk.Frame(self.timer_view, bg=BG)
+        controls.pack(pady=22)
+
+        self.pause_btn = tk.Button(
+            controls,
+            text="⏸ 일시정지",
+            font=("Malgun Gothic", 13, "bold"),
+            bg=WARNING,
+            fg="#000000",
+            relief="flat",
+            cursor="hand2",
+            padx=24,
+            pady=10,
+            command=self.toggle_pause
+        )
+        self.pause_btn.pack(side="left", padx=8)
+
+        tk.Button(
+            controls,
+            text="⏭ 다음 과목",
+            font=("Malgun Gothic", 13),
+            bg=CARD_BG,
+            fg=TEXT,
+            relief="flat",
+            cursor="hand2",
+            padx=24,
+            pady=10,
+            command=self.next_subject
+        ).pack(side="left", padx=8)
+
+        self.mini_schedule = tk.Frame(self.timer_view, bg=BG)
+        self.mini_schedule.pack(fill="x", padx=50, pady=(5, 0))
+
+    # ---------------------
+    # 타이머 로직
+    # ---------------------
+
+    def start_timer(self):
+        if not self.subjects:
+            messagebox.showwarning("과목 없음", "먼저 과목을 추가해주세요.")
+            return
+
+        start_index = self.first_pending_subject()
+
+        if start_index is None:
+            messagebox.showinfo("완료", "모든 과목이 이미 완료되었습니다.")
+            return
+
+        self.timer_running = True
+        self.timer_paused = False
+        self.current_subject = start_index
+
+        self.today_view.pack_forget()
+        self.weekly_view.pack_forget()
+        self.tab_header.pack_forget()
+        self.timer_view.pack(fill="both", expand=True)
+
+        self.load_subject(start_index)
+
+    def first_pending_subject(self):
+        for i, subj in enumerate(self.subjects):
+            if not subj.get("completed", False):
+                return i
+        return None
+
+    def load_subject(self, index):
+        if index >= len(self.subjects):
+            self.all_done()
+            return
+
+        self.current_subject = index
+
+        subj = self.subjects[index]
+        color = subj.get("color", ACCENT)
+
+        self.total_secs = subj["minutes"] * 60
+        self.elapsed_pause = min(
+            float(subj.get("elapsed_secs", 0)),
+            self.total_secs
+        )
+        self.start_mono = time.monotonic()
+
+        self.timer_paused = False
+        self.pause_btn.config(text="⏸ 일시정지", bg=WARNING)
+
+        char_key = subj.get("character", "turtle")
+        prop_key = subj.get("prop", "box")
+
+        char_icon, char_name = CHARACTERS.get(char_key, ("🐢", "거북이"))
+        prop_icon, prop_name = PROPS.get(prop_key, ("📦", "박스"))
+
+        self.lbl_subject_name.config(
+            text=subj["name"],
+            fg=color
+        )
+
+        self.lbl_subject_index.config(
+            text=f"과목 {index + 1} / {len(self.subjects)}"
+        )
+
+        self.lbl_char_prop.config(
+            text=f"{char_icon} {char_name} + {prop_icon} {prop_name}",
+            fg=color
+        )
+
+        self.lbl_timer.config(fg=color)
+        self.progress_canvas.itemconfig(self.progress_bar, fill=color)
+
+        self.refresh_mini_schedule()
+        self.render_loop()
+
+    def elapsed(self):
+        if self.timer_paused:
+            return self.elapsed_pause
+        return self.elapsed_pause + (time.monotonic() - self.start_mono)
+
+    def save_current_progress(self):
+        if not self.subjects:
+            return
+
+        if self.current_subject >= len(self.subjects):
+            return
+
+        subj = self.subjects[self.current_subject]
+        total = subj["minutes"] * 60
+
+        elapsed = min(self.elapsed(), total)
+
+        subj["elapsed_secs"] = elapsed
+        subj["completed"] = elapsed >= total
+
+    def render_loop(self):
+        if not self.timer_running:
+            return
+
+        elapsed = self.elapsed()
+        self.save_current_progress()
+
+        remaining = max(0, self.total_secs - elapsed)
+        progress = min(elapsed / self.total_secs, 1.0) if self.total_secs else 1.0
+
+        mins, secs = divmod(math.ceil(remaining), 60)
+        self.lbl_timer.config(text=f"{mins:02d}:{secs:02d}")
+
+        width = self.progress_canvas.winfo_width()
+        self.progress_canvas.coords(
+            self.progress_bar,
+            0,
+            0,
+            width * progress,
+            10
+        )
+
+        self.draw_simple_animation(progress)
+
+        if elapsed >= self.total_secs:
+            self.subject_done()
+            return
+
+        self.after(FRAME_MS, self.render_loop)
+
+    def toggle_pause(self):
+        if not self.timer_running:
+            return
+
+        if not self.timer_paused:
+            self.elapsed_pause = self.elapsed()
+            self.timer_paused = True
+            self.pause_btn.config(text="▶ 재개", bg=SUCCESS)
+
+        else:
+            self.start_mono = time.monotonic()
+            self.timer_paused = False
+            self.pause_btn.config(text="⏸ 일시정지", bg=WARNING)
+            self.render_loop()
+
+    def next_subject(self):
+        if not self.timer_running:
+            return
+
+        self.save_current_progress()
+        self.load_subject(self.current_subject + 1)
+
+    def subject_done(self):
+        self.save_current_progress()
+
+        self.lbl_timer.config(text="완료! ✓")
+        self.draw_simple_animation(1.0)
+
+        next_index = self.current_subject + 1
+
+        if next_index >= len(self.subjects):
+            self.after(700, self.all_done)
+            return
+
+        def ask():
+            dlg = StyledDialog(
+                self,
+                title="다음 과목",
+                message="다음 과목을 시작하시겠습니까?",
+                buttons=[
+                    ("예", SUCCESS, "yes"),
+                    ("아니오", CARD_BG, "no")
+                ],
+                icon="⏭"
+            )
+
+            if dlg.result == "yes":
+                self.load_subject(next_index)
+            else:
+                self.show_today_view()
+
+        self.after(700, ask)
+
+    def go_main_from_timer(self):
+        if self.timer_running:
+            self.save_current_progress()
+
+        dlg = StyledDialog(
+            self,
+            title="메인화면으로 이동",
+            message="현재 진행도를 저장하고 메인화면으로 돌아가시겠습니까?",
+            buttons=[
+                ("예", LIGHT_RED, "yes"),
+                ("아니오", CARD_BG, "no")
+            ],
+            icon="⚠️"
+        )
+
+        if dlg.result == "yes":
+            self.show_today_view()
+
+    def show_today_view(self):
+        self.timer_running = False
+        self.timer_paused = False
+
+        self.timer_view.pack_forget()
+        self.tab_header.pack(fill="x")
+
+        self.switch_tab("today")
+        self.refresh_subject_list()
+
+    def all_done(self):
+        self.timer_running = False
+
+        StyledDialog(
+            self,
+            title="공부 완료!",
+            message="오늘의 공부를 모두 끝냈습니다. 수고했어요!",
+            buttons=[
+                ("확인", SUCCESS, "ok")
+            ],
+            icon="🎉"
+        )
+
+        self.show_today_view()
+
+    # ---------------------
+    # 미니 시간표
+    # ---------------------
+
+    def refresh_mini_schedule(self):
+        for w in self.mini_schedule.winfo_children():
+            w.destroy()
+
+        tk.Label(
+            self.mini_schedule,
+            text="시간표",
+            font=("Malgun Gothic", 10),
+            bg=BG,
+            fg=TEXT_DIM
+        ).pack(anchor="w", pady=(0, 6))
+
+        row = tk.Frame(self.mini_schedule, bg=BG)
+        row.pack(fill="x")
+
+        for i, subj in enumerate(self.subjects):
+            if i < self.current_subject:
+                mark = "✓"
+                fg = TEXT_DIM
+            elif i == self.current_subject:
+                mark = "▶"
+                fg = subj.get("color", ACCENT)
+            else:
+                mark = "○"
+                fg = BORDER
+
+            tk.Label(
+                row,
+                text=f"{mark} {subj['name']}({subj['minutes']}분)",
+                font=("Malgun Gothic", 9),
+                bg=CARD_BG,
+                fg=fg,
+                padx=8,
+                pady=4
+            ).pack(side="left", padx=4)
+
+    # ---------------------
+    # 간단 애니메이션
+    # ---------------------
+
+    def draw_simple_animation(self, progress):
+        c = self.anim_canvas
+        c.delete("all")
+
+        w = c.winfo_width() or 800
+        h = c.winfo_height() or 150
+
+        ground = h - 35
+        start_x = 45
+        end_x = w - 45
+
+        subj = self.subjects[self.current_subject]
+        color = subj.get("color", ACCENT)
+
+        char_key = subj.get("character", "turtle")
+        prop_key = subj.get("prop", "box")
+
+        char_icon = CHARACTERS.get(char_key, ("🐢", ""))[0]
+        prop_icon = PROPS.get(prop_key, ("📦", ""))[0]
+
+        x = start_x + (end_x - start_x) * progress
+
+        c.create_rectangle(
+            0,
+            ground,
+            w,
+            h,
+            fill="#1a2e1a",
+            outline=""
+        )
+
+        c.create_line(
+            start_x,
+            ground,
+            end_x,
+            ground,
+            fill=BORDER,
+            width=3
+        )
+
+        c.create_text(
+            start_x,
+            ground + 16,
+            text="START",
+            fill=TEXT_DIM,
+            font=("Courier New", 8, "bold")
+        )
+
+        c.create_text(
+            end_x,
+            ground + 16,
+            text="END",
+            fill=color,
+            font=("Courier New", 8, "bold")
+        )
+
+        c.create_oval(
+            x - 22,
+            ground - 5,
+            x + 22,
+            ground + 5,
+            fill="#0a1010",
+            outline=""
+        )
+
+        c.create_text(
+            x,
+            ground - 34,
+            text=char_icon,
+            font=("Segoe UI Emoji", 32)
+        )
+
+        c.create_text(
+            min(x + 45, end_x),
+            ground - 30,
+            text=prop_icon,
+            font=("Segoe UI Emoji", 26)
+        )
+
+    # ---------------------
+    # 실행
+    # ---------------------
+
+
+if __name__ == "__main__":
+    app = StudyTimerApp()
+    app.mainloop()
