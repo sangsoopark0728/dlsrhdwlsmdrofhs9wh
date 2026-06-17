@@ -5,8 +5,8 @@
 
 
 장하균: 진행도 기록기능, 다음과목으로 넘어갈 때 스톱,팝업기능 추가, 이어하기 기능 제작(study_timer_progress.py),
-공부 기록 초기화 기능, 주간계획표 계획 불러오기 기능 추가(study timer Last_upgraded)
-공부시간 입력에 문자열 들어갔을때 오류방지(
+공부 기록 초기화 기능, 주간계획표 계획 불러오기 기능 추가(study timer Last_upgraded),
+공부시간 입력에 문자열 들어갔을때 오류방지,축약(study timer Last_upgraded_debugged)
 
 
 송윤주: 앱 아이디어 제시, 캐릭터 추가(study_timer.py) , 주간계획표 탭/기능 추가(Study_Timer_rre)
