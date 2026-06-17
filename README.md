@@ -1,3 +1,6 @@
+**타이머  최종본 업데이트 완료- (study timer Last_upgraded_debugged.py) *
+발표 영상 링크:
+
 팀원별 역할
 
 박상수: 기초UI/캐릭터 제작(Study timer),(study_timer(base).py),메인화면으로 돌아가기/팝업창 제작(study_timer(f).py), 
@@ -14,8 +17,6 @@
 
 
 
-
-**타이머 수정본 계속 업데이트 될 예정입니다**
 
 (1)캐릭터 추가
 -거북이
