@@ -51,7 +51,7 @@ if 중간에 타이머에서 홈 화면으로 가면:
    if user_click == Yes:
    메인 화면으로 돌아가기
 
-
+https://claude.ai/share/16d2e5bc-b7b9-47b0-a8e0-6e95a3c59e88
 
 
    'study timer Last'에 이전에 있던 코드 축약 + '오늘의 공부 시간표'도 과목이나 진행도가 앱을 껐다가 켜도 계속 유지되도록 함
